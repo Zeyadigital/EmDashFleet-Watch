@@ -20,6 +20,14 @@ const WORKFLOWS = {
     hookSecret: "SLACK_WATCH_WEBHOOK_URL",
     environment: "production",
   },
+  "watch-staging.yml": {
+    name: "watch-staging",
+    healthzUrl: "https://staging.emdashfleet.com/healthz",
+    landingUrl: "${{ vars.STAGING_SITE_URL }}",
+    tokenSecret: "WATCH_CHECKIN_TOKEN_STAGING",
+    hookSecret: "SLACK_WATCH_WEBHOOK_URL_STAGING",
+    environment: "staging",
+  },
 };
 
 const read = (file) => readFileSync(join(ROOT, ".github", "workflows", file), "utf8");
@@ -132,3 +140,43 @@ for (const [file, want] of Object.entries(WORKFLOWS)) {
     });
   });
 }
+
+describe("production and staging", () => {
+  const production = code("watch.yml").split("\n");
+  const staging = code("watch-staging.yml").split("\n");
+
+  test("watch-staging.yml is watch.yml with only the staging values changed", () => {
+    assert.equal(staging.length, production.length);
+    const differing = production.flatMap((line, index) => (line === staging[index] ? [] : [[line.trim(), staging[index].trim()]]));
+    assert.deepEqual(differing, [
+      ["name: watch", "name: watch-staging"],
+      ["WATCH_URL: https://app.emdashfleet.com/healthz", "WATCH_URL: https://staging.emdashfleet.com/healthz"],
+      ["WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN }}", "WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN_STAGING }}"],
+      ["WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL }}", "WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL_STAGING }}"],
+      ["WATCH_ENVIRONMENT: production", "WATCH_ENVIRONMENT: staging"],
+      ["WATCH_URL: https://emdashfleet.com/", "WATCH_URL: ${{ vars.STAGING_SITE_URL }}"],
+      ["WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL }}", "WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL_STAGING }}"],
+      ["WATCH_ENVIRONMENT: production", "WATCH_ENVIRONMENT: staging"],
+    ]);
+  });
+
+  test("watch-staging.yml never names a production secret, even in a comment", () => {
+    const text = read("watch-staging.yml");
+    assert.doesNotMatch(text, /SLACK_WATCH_WEBHOOK_URL(?!_STAGING)/);
+    assert.doesNotMatch(text, /WATCH_CHECKIN_TOKEN(?!_STAGING)/);
+    assert.doesNotMatch(text, /NIGHTLY_CHECKIN|SLACK_CI_WEBHOOK|SLACK_MAIL_WEBHOOK|app\.emdashfleet\.com|https:\/\/emdashfleet\.com/);
+    assert.match(text, /SLACK_WATCH_WEBHOOK_URL_STAGING/);
+  });
+
+  test("watch.yml never names a staging secret or address", () => {
+    const text = code("watch.yml");
+    assert.doesNotMatch(text, /_STAGING|staging|STAGING_SITE_URL/);
+  });
+
+  test("every script and workflow other than the check scripts uses the same check script", () => {
+    for (const file of Object.keys(WORKFLOWS)) {
+      const runs = steps(file).flatMap((step) => (step.run === null ? [] : [step.run]));
+      assert.deepEqual(runs, ["bash scripts/watch-check.sh healthz", "bash scripts/watch-check.sh landing"]);
+    }
+  });
+});
