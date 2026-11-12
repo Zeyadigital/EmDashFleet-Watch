@@ -11,6 +11,7 @@ Checks EmDash Fleet from outside Cloudflare. The scheduled workflows `watch.yml`
 
 - `.github/workflows/watch.yml` checks production: `https://app.emdashfleet.com/healthz` with the Bearer token `WATCH_CHECKIN_TOKEN` (which is also the check-in Fleet reads) and `https://emdashfleet.com/`, as two steps. A check fails on a status other than 200 or on no answer within 10 seconds and is repeated once 5 minutes later; when both attempts fail the step posts to Slack through `SLACK_WATCH_WEBHOOK_URL` and the run fails. Repository secrets: `WATCH_CHECKIN_TOKEN` and `SLACK_WATCH_WEBHOOK_URL`.
 - `scripts/watch-check.sh` is the one check script of the workflows. It needs `bash` and `curl` only and prints nothing but each URL's HTTP status.
+- `scripts/keepalive.sh` is run by the monthly privileged-access review. GitHub disables scheduled workflows in a public repository after 60 days without activity, so the script pushes one empty commit, signed with the operator's own key, to `main` as a fast-forward, from a temporary clone. Run it as `bash scripts/keepalive.sh` (add `--dry-run` to push nothing and `--check-state` to read the state of `watch.yml` with `gh` afterwards). It is the one direct push to `main` the branch rules above allow, because the plan asks for it; a ruleset that blocks direct pushes must let the owner's push through.
 
 ## Tests
 
