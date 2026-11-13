@@ -1,9 +1,9 @@
 // Tests of the repository hygiene files (tracker APB-001, APC-005): Dependabot,
-// the gitleaks hook and configuration, the exact Node.js version, the absence of
-// dependencies and the pull request workflow ci.yml. Workflow files are parsed as
+// the gitleaks configuration, the absence of git hooks, the exact Node.js version,
+// the absence of dependencies and the workflow ci.yml. Workflow files are parsed as
 // text, without a YAML package, like test/workflows.test.mjs. Run with `npm test`.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { ROOT, TOKEN } from "./helpers.mjs";
@@ -43,19 +43,12 @@ describe("gitleaks", () => {
     assert.ok(text.includes(`regexes = ['''^${TOKEN}$''']`), "the allowlist must name the exact token of test/helpers.mjs");
   });
 
-  test("the pre-commit hook is executable and scans the staged changes", () => {
-    const hook = ".githooks/pre-commit";
-    assert.ok(statSync(join(ROOT, hook)).mode & 0o100, "the hook is not executable");
-    assert.match(read(hook), /^#!\/bin\/sh$/m);
-    assert.match(code(hook), /^gitleaks git --pre-commit --redact --staged --no-banner$/m);
-    assert.match(code(hook), /command -v gitleaks/);
-  });
-
-  test("CONTRIBUTING.md names the hooks path and the signing setting", () => {
-    const text = read("CONTRIBUTING.md");
-    assert.match(text, /git config core\.hooksPath \.githooks/);
-    assert.match(text, /git config commit\.gpgsign true/);
-    assert.match(text, /gitleaks 8\.30\.1/);
+  test("gitleaks runs in ci.yml only: no git hooks directory, and no hooks path or signing instruction (HR-162)", () => {
+    assert.ok(!readdirSync(ROOT).includes(".githooks"), "the repository has a hooks directory");
+    for (const file of ["CONTRIBUTING.md", "README.md"]) {
+      assert.doesNotMatch(read(file), /hooksPath|gpgsign|signingkey|\.githooks/, file);
+    }
+    assert.match(read("CONTRIBUTING.md"), /gitleaks 8\.30\.1/);
   });
 });
 
@@ -70,8 +63,8 @@ describe(".nvmrc", () => {
 describe("ci.yml", () => {
   const text = code(".github/workflows/ci.yml");
 
-  test("runs on pull requests to dev and main only, with a read-only token", () => {
-    assert.match(text, /^on:\n {2}pull_request:\n {4}branches: \[dev, main\]\n/m);
+  test("runs on pushes to dev and main and on pull requests to dev and main only, with a read-only token", () => {
+    assert.match(text, /^on:\n {2}push:\n {4}branches: \[dev, main\]\n {2}pull_request:\n {4}branches: \[dev, main\]\n/m);
     assert.match(text, /^permissions:\n {2}contents: read\n(?! {2}\S)/m);
     assert.match(text, /^ {4}timeout-minutes: \d+$/m);
   });
@@ -95,11 +88,13 @@ describe("ci.yml", () => {
     assert.doesNotMatch(scripts.join("\n"), /\$\{\{/);
   });
 
-  test("runs gitleaks 8.30.1 over the pull request commits after checking the archive", () => {
+  test("runs gitleaks 8.30.1 over the commits of the push or pull request after checking the archive", () => {
     assert.match(text, /fetch-depth: 0/);
     assert.match(text, /GITLEAKS_VERSION: 8\.30\.1$/m);
     assert.match(text, /GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb$/m);
     assert.match(text, /sha256sum --check --strict/);
+    assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
+    assert.match(text, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
     assert.match(text, /git rev-list --quiet "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
     assert.match(text, /gitleaks" git .*--log-opts="\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
   });

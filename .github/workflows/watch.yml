@@ -1,8 +1,8 @@
 # The outside watch of Fleet's production environment (EmDash Fleet app plan,
 # Operations, Alerts; alerts A20, A21, A44 and A53; pre-mortem PM-AP-31;
 # tracker APC-030). GitHub runs a schedule from the default branch only, so
-# this file runs from main, and main changes only through a release pull
-# request (README).
+# this file runs from main, and a co-founder pushes to main when a change is
+# ready (emdashfleet_app_plan.md D31 (HR-162); README).
 #
 # Two separate steps, each through scripts/watch-check.sh:
 #   healthz        https://app.emdashfleet.com/healthz with the Bearer token

@@ -13,17 +13,16 @@ import { ROOT } from "./helpers.mjs";
 const SCRIPT = join(ROOT, "scripts", "keepalive.sh");
 let dir;
 let bare;
-let signedConfig;
-let unsignedConfig;
-let signers;
+let config;
+let noIdentityConfig;
 
-const git = (args, cwd, env = {}) => execFileSync("git", args, { cwd, env: { PATH: process.env.PATH, HOME: dir, GIT_CONFIG_GLOBAL: unsignedConfig, GIT_CONFIG_NOSYSTEM: "1", ...env }, encoding: "utf8" }).trim();
+const git = (args, cwd, env = {}) => execFileSync("git", args, { cwd, env: { PATH: process.env.PATH, HOME: dir, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", ...env }, encoding: "utf8" }).trim();
 const bareGit = (...args) => git(["--git-dir", bare, ...args], dir);
 
 /** Runs the script with a given global git configuration and extra PATH directories. */
-function keepalive(args, { config = signedConfig, path = process.env.PATH, remote = bare } = {}) {
+function keepalive(args, { gitConfig = config, path = process.env.PATH, remote = bare } = {}) {
   const result = spawnSync("bash", [SCRIPT, ...(remote === null ? [] : ["--remote", remote]), ...args], {
-    env: { PATH: path, HOME: dir, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1" },
+    env: { PATH: path, HOME: dir, GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1" },
     encoding: "utf8",
   });
   return { code: result.status, output: `${result.stdout}${result.stderr}`.trim() };
@@ -31,15 +30,10 @@ function keepalive(args, { config = signedConfig, path = process.env.PATH, remot
 
 before(() => {
   dir = mkdtempSync(join(tmpdir(), "keepalive-test-"));
-  execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "test@example.invalid", "-f", join(dir, "key")]);
-  const pub = readFileSync(join(dir, "key.pub"), "utf8").trim().split(" ").slice(0, 2).join(" ");
-  signers = join(dir, "allowed-signers");
-  writeFileSync(signers, `test@example.invalid ${pub}\n`);
-  const identity = "[user]\n\tname = Test Operator\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n";
-  unsignedConfig = join(dir, "unsigned.gitconfig");
-  writeFileSync(unsignedConfig, `${identity}[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tallowedSignersFile = ${signers}\n`);
-  signedConfig = join(dir, "signed.gitconfig");
-  writeFileSync(signedConfig, `${identity}[user]\n\tsigningkey = ${join(dir, "key.pub")}\n[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tallowedSignersFile = ${signers}\n`);
+  config = join(dir, "operator.gitconfig");
+  writeFileSync(config, "[user]\n\tname = Test Operator\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n");
+  noIdentityConfig = join(dir, "no-identity.gitconfig");
+  writeFileSync(noIdentityConfig, "[user]\n\tuseConfigOnly = true\n[init]\n\tdefaultBranch = main\n");
 
   bare = join(dir, "remote.git");
   git(["init", "--bare", "--quiet", "--initial-branch=main", bare], dir);
@@ -58,33 +52,29 @@ describe("keepalive.sh", () => {
     const before = bareGit("rev-parse", "main");
     const { code, output } = keepalive(["--dry-run"]);
     assert.equal(code, 0);
-    assert.match(output, /^Dry run: created the signed commit [0-9a-f]{12} on main; nothing was pushed\.$/);
+    assert.match(output, /^Dry run: created the commit [0-9a-f]{12} on main; nothing was pushed\.$/);
     assert.equal(bareGit("rev-parse", "main"), before);
   });
 
-  test("pushes one signed, empty commit to main as a fast-forward", () => {
+  test("pushes one empty commit to main as a fast-forward", () => {
     const parent = bareGit("rev-parse", "main");
     const dev = bareGit("rev-parse", "dev");
     const { code, output } = keepalive([]);
     assert.equal(code, 0);
-    assert.match(output, /^Pushed the signed keepalive commit [0-9a-f]{12} to main\.$/);
+    assert.match(output, /^Pushed the keepalive commit [0-9a-f]{12} to main\.$/);
     const head = bareGit("rev-parse", "main");
     assert.notEqual(head, parent);
     assert.equal(bareGit("rev-parse", `${head}^`), parent, "the commit is a fast-forward of the old head");
     assert.equal(bareGit("rev-parse", `${head}^{tree}`), bareGit("rev-parse", `${parent}^{tree}`), "the commit changes no file");
     assert.match(bareGit("log", "-1", "--format=%s", head), /^Keepalive \d{4}-\d{2}-\d{2}$/);
-    assert.match(bareGit("cat-file", "commit", head), /^gpgsig /m);
-    const verified = spawnSync("git", ["--git-dir", bare, "verify-commit", head], { env: { PATH: process.env.PATH, HOME: dir, GIT_CONFIG_GLOBAL: unsignedConfig, GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8" });
-    assert.equal(verified.status, 0, verified.stderr);
-    assert.match(verified.stderr, /Good "git" signature/);
     assert.equal(bareGit("rev-parse", "dev"), dev, "dev is left alone");
   });
 
-  test("refuses to push when the commit cannot be signed", () => {
+  test("refuses to push when the commit cannot be created", () => {
     const before = bareGit("rev-parse", "main");
-    const { code, output } = keepalive([], { config: unsignedConfig });
+    const { code, output } = keepalive([], { gitConfig: noIdentityConfig });
     assert.equal(code, 1);
-    assert.match(output, /The commit could not be created or signed\./);
+    assert.match(output, /The commit could not be created\. Set user\.name and user\.email/);
     assert.equal(bareGit("rev-parse", "main"), before);
   });
 
@@ -135,7 +125,7 @@ describe("keepalive.sh", () => {
     chmodSync(join(stubs, "gh"), 0o755);
     const run = (state) => {
       const result = spawnSync("bash", [SCRIPT, "--remote", bare, "--check-state"], {
-        env: { PATH: `${stubs}:${process.env.PATH}`, HOME: dir, GIT_CONFIG_GLOBAL: signedConfig, GIT_CONFIG_NOSYSTEM: "1", GH_STATE: state },
+        env: { PATH: `${stubs}:${process.env.PATH}`, HOME: dir, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GH_STATE: state },
         encoding: "utf8",
       });
       return { code: result.status, output: `${result.stdout}${result.stderr}`.trim() };

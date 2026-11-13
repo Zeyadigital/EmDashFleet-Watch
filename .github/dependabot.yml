@@ -1,7 +1,7 @@
 # Weekly version updates of every GitHub Action of the outside watch (app plan,
 # Security (Template supply chain); CLAUDE.md Versions constraint; tracker
-# APB-001, APC-005). Pull requests target dev, where feature pull requests go;
-# the newest stable release is proposed, the owner merges it. GitHub Actions is
+# APB-001, APC-005). Pull requests target dev, where pushes go (HR-162); the
+# newest stable release is proposed, a co-founder merges it. GitHub Actions is
 # the only ecosystem in use: package.json holds no dependency (test/hygiene.test.mjs
 # fails when one appears, and then an npm entry is added here), and the check
 # script is plain bash and curl.

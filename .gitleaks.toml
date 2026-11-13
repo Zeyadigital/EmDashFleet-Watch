@@ -1,5 +1,5 @@
 # gitleaks configuration (https://github.com/gitleaks/gitleaks/tree/v8.30.1#configuration),
-# loaded from the target path by the pre-commit hook and by ci.yml.
+# loaded from the target path by ci.yml, the only place gitleaks runs (HR-162).
 [extend]
 useDefault = true
 
