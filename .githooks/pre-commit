@@ -1,0 +1,13 @@
+#!/bin/sh
+# Runs before every commit: gitleaks on the staged changes (app plan, Security:
+# gitleaks as a pre-commit hook on every repository). Enable it once per clone
+# with
+#   git config core.hooksPath .githooks
+# and install gitleaks 8.30.1, the version ci.yml runs (CONTRIBUTING.md).
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-commit: gitleaks is not installed; install 8.30.1 (CONTRIBUTING.md)" >&2
+	exit 1
+fi
+gitleaks git --pre-commit --redact --staged --no-banner

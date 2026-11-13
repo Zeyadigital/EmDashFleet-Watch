@@ -1,0 +1,14 @@
+# gitleaks configuration (https://github.com/gitleaks/gitleaks/tree/v8.30.1#configuration),
+# loaded from the target path by the pre-commit hook and by ci.yml.
+[extend]
+useDefault = true
+
+# The tests send a made-up token to a local server and check that no output
+# holds it (test/helpers.mjs). It is not a credential: only this exact value,
+# in this file, for the rule it trips.
+[[allowlists]]
+description = "Made-up token of the tests"
+targetRules = ["generic-api-key"]
+paths = ['''^test/helpers\.mjs$''']
+regexes = ['''^tok-6f1c0d2e9b7a4c35-SECRET$''']
+condition = "AND"
