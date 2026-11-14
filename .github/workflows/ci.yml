@@ -19,11 +19,13 @@ on:
 permissions:
   contents: read
 
-# One run per push and per pull request. Only a pull request run is cancelled
-# by a newer one: cancelling the run of an earlier push would leave its
-# commits unscanned.
+# A pull request's runs share one group and a newer one cancels the older. A
+# push run has a group of its own (its run id): in a shared group GitHub
+# replaces a run still pending by a newer pending one whatever
+# cancel-in-progress says, and a replaced push run would leave its commit range
+# (github.event.before..github.sha, the gitleaks step) unscanned.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

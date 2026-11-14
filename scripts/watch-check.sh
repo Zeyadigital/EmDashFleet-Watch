@@ -92,15 +92,19 @@ code=000
 stale=0
 
 # Requests the address once; sets `code` (000 when no answer arrived) and
-# `stale` (1 for a 503 whose body is exactly cron_stale).
+# `stale` (1 for a 503 whose body is exactly cron_stale). A request curl does
+# not complete (exit status other than 0: a timeout while the body was still
+# arriving, a closed connection, a body past 1 MiB) is no answer even when
+# curl printed the status line it had received; the token goes only to the
+# healthz check. --globoff keeps brackets in the address literal.
 attempt() {
   local n="$1"
   rm -f "$work/body"
-  local common=(--silent --max-time "$timeout" --max-redirs 0 --proto "$proto" --output "$work/body" --write-out '%{http_code}')
-  if [ -n "$token" ]; then
-    code="$(printf 'Authorization: Bearer %s\n' "$token" | curl "${common[@]}" --header @- "$url" 2>/dev/null)"
+  local common=(--silent --globoff --max-time "$timeout" --max-redirs 0 --max-filesize 1048576 --proto "$proto" --output "$work/body" --write-out '%{http_code}')
+  if [ "$kind" = "healthz" ] && [ -n "$token" ]; then
+    code="$(printf 'Authorization: Bearer %s\n' "$token" | curl "${common[@]}" --header @- "$url" 2>/dev/null)" || code=000
   else
-    code="$(curl "${common[@]}" "$url" 2>/dev/null)"
+    code="$(curl "${common[@]}" "$url" 2>/dev/null)" || code=000
   fi
   case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
   stale=0
