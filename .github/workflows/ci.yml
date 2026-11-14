@@ -1,0 +1,62 @@
+# The checks of every push to dev or main of this public repository and of
+# Dependabot's pull requests (emdashfleet_app_plan.md D31 (HR-162); app plan,
+# Security; tracker APB-001, APC-005). A co-founder pushes alone: no pull
+# request, review, approver or signed commit is required. The token only reads
+# the repository, the job uses no secret (the secrets of watch.yml and
+# watch-staging.yml are never available to a pull request from a fork anyway),
+# every action is pinned by full commit SHA, and the job deploys and posts
+# nothing: it runs gitleaks 8.30.1 over the commits of the push or pull request
+# and the tests, which reach no real address and no real webhook (README). The
+# workflows that watch Fleet run from main only (watch.yml).
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+# One run per push and per pull request. Only a pull request run is cancelled
+# by a newer one: cancelling the run of an earlier push would leave its
+# commits unscanned.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The full history, for the gitleaks range.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The CLI release, checked against the SHA-256 of its archive.
+      - name: gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          # gitleaks 8.30.1 exits 0 when its git log fails, so a range that
+          # does not resolve would pass unscanned.
+          git rev-list --quiet "${BASE_SHA}..${HEAD_SHA}"
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="${BASE_SHA}..${HEAD_SHA}" .
+
+      # No lockfile and no dependency: no cache and no install. Node.js 26.13.0
+      # bundles the npm that runs the tests.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm test
