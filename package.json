@@ -1,0 +1,9 @@
+{
+  "name": "emdashfleet-watch",
+  "private": true,
+  "license": "MIT",
+  "description": "Outside watch of EmDash Fleet: two scheduled GitHub Actions workflows, one check script and their tests. No dependencies.",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

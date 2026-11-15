@@ -1,0 +1,62 @@
+# The outside watch of Fleet's production environment (EmDash Fleet app plan,
+# Operations, Alerts; alerts A20, A21, A44 and A53; pre-mortem PM-AP-31;
+# tracker APC-030). GitHub runs a schedule from the default branch only, so
+# this file runs from main, and a co-founder pushes to main when a change is
+# ready (emdashfleet_app_plan.md D31 (HR-162); README).
+#
+# Two separate steps, each through scripts/watch-check.sh:
+#   healthz        https://app.emdashfleet.com/healthz with the Bearer token
+#                  WATCH_CHECKIN_TOKEN, which also writes the cron_checkin row
+#                  watch.yml that alert A53 reads; failing posts A21, or A20
+#                  when both attempts answer 503 cron_stale;
+#   landing page   https://emdashfleet.com/; failing posts A44.
+# A check fails on a status other than 200 or on no answer within 10 seconds
+# and is repeated once 5 minutes later; when both attempts fail the step posts
+# <!channel> to #fleet-alerts through the Incoming Webhook
+# SLACK_WATCH_WEBHOOK_URL and exits non-zero, so the run fails and GitHub
+# emails the co-founder who last changed the schedule. Every later failing run
+# posts again; no recovery message is posted.
+#
+# The landing page step runs after a failed healthz step (`!cancelled()`), so
+# an outage of one never hides the other. Each secret is the env: of the one
+# step that uses it, no run: block holds an expression, the repository is
+# public and the log holds only each URL's HTTP status. The token only reads
+# this repository to fetch the script, and the checkout keeps no credential.
+# Every action is pinned by full commit SHA. SP-VN-07 (f) records whether a
+# webhook message notifies with <!channel>; until then the failed-run email
+# and A53 back the post.
+name: watch
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: healthz
+        env:
+          WATCH_URL: https://app.emdashfleet.com/healthz
+          WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN }}
+          WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL }}
+          WATCH_ENVIRONMENT: production
+        run: bash scripts/watch-check.sh healthz
+
+      - name: landing page
+        if: ${{ !cancelled() }}
+        env:
+          WATCH_URL: https://emdashfleet.com/
+          WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL }}
+          WATCH_ENVIRONMENT: production
+        run: bash scripts/watch-check.sh landing

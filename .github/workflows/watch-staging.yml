@@ -1,0 +1,59 @@
+# The outside watch of Fleet's staging environment (EmDash Fleet app plan,
+# Operations, Alerts; alert A53 rehearsal and the outside watch test of
+# Testing; pre-mortem PM-AP-31; tracker APC-032). It is identical to watch.yml
+# except for the values below, and runs the same script, scripts/watch-check.sh:
+#   healthz        https://staging.emdashfleet.com/healthz with the Bearer
+#                  token WATCH_CHECKIN_TOKEN_STAGING, the Worker secret of
+#                  fleet-dashboard-staging, so a run writes the cron_checkin
+#                  row watch.yml in the staging fleet-core;
+#   landing page   the staging landing site at the workers.dev address held in
+#                  the repository variable STAGING_SITE_URL;
+#   alerts         posted through the Incoming Webhook
+#                  SLACK_WATCH_WEBHOOK_URL_STAGING to #fleet-alerts-staging and
+#                  never to #fleet-alerts; this file names no production
+#                  secret (test/workflows.test.mjs checks it).
+# A check fails on a status other than 200 or on no answer within 10 seconds
+# and is repeated once 5 minutes later; when both attempts fail the step posts
+# and exits non-zero, so the run fails and GitHub emails the co-founder who
+# last changed the schedule. Every later failing run posts again; no recovery
+# message is posted.
+#
+# The Actions log of this public repository shows the value of
+# STAGING_SITE_URL in the env: block of the landing page step; the variable
+# holds a public staging address and nothing secret. Every action is pinned
+# by full commit SHA.
+name: watch-staging
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: healthz
+        env:
+          WATCH_URL: https://staging.emdashfleet.com/healthz
+          WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN_STAGING }}
+          WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL_STAGING }}
+          WATCH_ENVIRONMENT: staging
+        run: bash scripts/watch-check.sh healthz
+
+      - name: landing page
+        if: ${{ !cancelled() }}
+        env:
+          WATCH_URL: ${{ vars.STAGING_SITE_URL }}
+          WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL_STAGING }}
+          WATCH_ENVIRONMENT: staging
+        run: bash scripts/watch-check.sh landing
