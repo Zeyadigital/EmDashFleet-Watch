@@ -33,7 +33,8 @@ before(() => {
   config = join(dir, "operator.gitconfig");
   writeFileSync(config, "[user]\n\tname = Test Operator\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n");
   noIdentityConfig = join(dir, "no-identity.gitconfig");
-  writeFileSync(noIdentityConfig, "[user]\n\tuseConfigOnly = true\n[init]\n\tdefaultBranch = main\n");
+  // No [user] section and no useConfigOnly: git would guess a name and address from the computer, which the script must refuse.
+  writeFileSync(noIdentityConfig, "[init]\n\tdefaultBranch = main\n");
 
   bare = join(dir, "remote.git");
   git(["init", "--bare", "--quiet", "--initial-branch=main", bare], dir);
@@ -43,6 +44,9 @@ before(() => {
   git(["add", "README.md"], seed);
   git(["commit", "--quiet", "-m", "seed"], seed);
   git(["push", "--quiet", bare, "HEAD:refs/heads/main", "HEAD:refs/heads/dev"], seed);
+  git(["tag", "light1"], seed);
+  git(["tag", "-a", "v1", "-m", "v1"], seed);
+  git(["push", "--quiet", bare, "light1", "v1"], seed);
 });
 
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -52,7 +56,7 @@ describe("keepalive.sh", () => {
     const before = bareGit("rev-parse", "main");
     const { code, output } = keepalive(["--dry-run"]);
     assert.equal(code, 0);
-    assert.match(output, /^Dry run: created the commit [0-9a-f]{12} on main; nothing was pushed\.$/);
+    assert.match(output, /^Dry run: created the commit [0-9a-f]{12} on main as Test Operator <test@example\.invalid>; nothing was pushed\.$/);
     assert.equal(bareGit("rev-parse", "main"), before);
   });
 
@@ -61,7 +65,7 @@ describe("keepalive.sh", () => {
     const dev = bareGit("rev-parse", "dev");
     const { code, output } = keepalive([]);
     assert.equal(code, 0);
-    assert.match(output, /^Pushed the keepalive commit [0-9a-f]{12} to main\.$/);
+    assert.match(output, /^Pushed the keepalive commit [0-9a-f]{12} to main as Test Operator <test@example\.invalid>\.$/);
     const head = bareGit("rev-parse", "main");
     assert.notEqual(head, parent);
     assert.equal(bareGit("rev-parse", `${head}^`), parent, "the commit is a fast-forward of the old head");
@@ -70,12 +74,21 @@ describe("keepalive.sh", () => {
     assert.equal(bareGit("rev-parse", "dev"), dev, "dev is left alone");
   });
 
-  test("refuses to push when the commit cannot be created", () => {
+  test("refuses to push when no git identity is configured, instead of letting git guess one", () => {
     const before = bareGit("rev-parse", "main");
     const { code, output } = keepalive([], { gitConfig: noIdentityConfig });
     assert.equal(code, 1);
     assert.match(output, /The commit could not be created\. Set user\.name and user\.email/);
     assert.equal(bareGit("rev-parse", "main"), before);
+  });
+
+  test("a tag given as --branch is refused, and no branch named after it is created", () => {
+    for (const tag of ["v1", "light1"]) {
+      const { code, output } = keepalive(["--branch", tag]);
+      assert.equal(code, 1, tag);
+      assert.match(output, new RegExp(`^${tag} is not a branch of the remote\\.$`));
+      assert.throws(() => bareGit("rev-parse", "--verify", "--quiet", `refs/heads/${tag}`), undefined, tag);
+    }
   });
 
   test("a refused push (a protected branch) changes nothing and says so", () => {
@@ -87,7 +100,7 @@ describe("keepalive.sh", () => {
     try {
       const { code, output } = keepalive([]);
       assert.equal(code, 1);
-      assert.match(output, /The push to main was refused/);
+      assert.match(output, /^git: .*\n.*The push to main was refused/);
       assert.equal(bareGit("rev-parse", "main"), before);
     } finally {
       rmSync(join(hooks, "pre-receive"));
@@ -117,26 +130,37 @@ describe("keepalive.sh", () => {
     assert.equal(keepalive([], { remote: "" }).code, 2);
   });
 
-  test("--check-state reads watch.yml through gh and fails unless it is active", () => {
+  test("--check-state reads both scheduled workflows through gh, after a push or a dry run, and fails unless both are active", () => {
     const stubs = join(dir, "stubs");
     mkdirSync(stubs, { recursive: true });
     const calls = join(dir, "gh-calls");
-    writeFileSync(join(stubs, "gh"), `#!/bin/sh\necho "$@" >> "${calls}"\nprintf '%s\\n' "$GH_STATE"\n`);
+    // The stub answers GH_STATE for watch.yml and GH_STAGING for watch-staging.yml.
+    writeFileSync(join(stubs, "gh"), `#!/bin/sh\necho "$@" >> "${calls}"\ncase "$*" in *watch-staging.yml*) printf '%s\\n' "$GH_STAGING" ;; *) printf '%s\\n' "$GH_STATE" ;; esac\n`);
     chmodSync(join(stubs, "gh"), 0o755);
-    const run = (state) => {
-      const result = spawnSync("bash", [SCRIPT, "--remote", bare, "--check-state"], {
-        env: { PATH: `${stubs}:${process.env.PATH}`, HOME: dir, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GH_STATE: state },
+    const run = (state, staging, extra = []) => {
+      const result = spawnSync("bash", [SCRIPT, "--remote", bare, "--check-state", ...extra], {
+        env: { PATH: `${stubs}:${process.env.PATH}`, HOME: dir, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GH_STATE: state, GH_STAGING: staging },
         encoding: "utf8",
       });
       return { code: result.status, output: `${result.stdout}${result.stderr}`.trim() };
     };
-    const active = run("active");
+    const active = run("active", "active");
     assert.equal(active.code, 0);
-    assert.match(active.output, /watch\.yml state: active/);
-    const disabled = run("disabled_inactivity");
+    assert.match(active.output, /watch\.yml state: active\nwatch-staging\.yml state: active/);
+    const disabled = run("disabled_inactivity", "active");
     assert.equal(disabled.code, 1);
     assert.match(disabled.output, /watch\.yml is not active\. Run the runbook Re-enable the outside watch\./);
-    assert.match(readFileSync(calls, "utf8"), /^api repos\/Zeyadigital\/EmDashFleet-Watch\/actions\/workflows\/watch\.yml --jq \.state$/m);
+    const staging = run("active", "disabled_manually");
+    assert.equal(staging.code, 1);
+    assert.match(staging.output, /watch-staging\.yml is not active\./);
+    const before = bareGit("rev-parse", "main");
+    const dry = run("disabled_inactivity", "active", ["--dry-run"]);
+    assert.equal(dry.code, 1, "a dry run still performs the requested check");
+    assert.match(dry.output, /nothing was pushed\.\nwatch\.yml state: disabled_inactivity/);
+    assert.equal(bareGit("rev-parse", "main"), before);
+    const lines = readFileSync(calls, "utf8");
+    assert.match(lines, /^api --hostname github\.com repos\/Zeyadigital\/EmDashFleet-Watch\/actions\/workflows\/watch\.yml --jq \.state$/m);
+    assert.match(lines, /^api --hostname github\.com repos\/Zeyadigital\/EmDashFleet-Watch\/actions\/workflows\/watch-staging\.yml --jq \.state$/m);
   });
 
   test("the default remote is the public repository, and the script never forces a push", () => {
