@@ -36,6 +36,18 @@ describe("a healthy run", () => {
     assert.equal(target.requests[0].authorization, null);
   });
 
+  // The landing page is public: the token of the step environment never reaches it, even when
+  // one is set, on the first attempt, on the retry or in the alert (security audit of 2026-11-21,
+  // Watch S9 c).
+  test("the landing page check sends no Authorization header even when a token is set", async () => {
+    const { target, hook } = await setup([{ status: 500 }, { status: 200 }]);
+    const { code, output } = await runCheck("landing", testEnv(target, hook, { WATCH_TOKEN: TOKEN }));
+    assert.equal(code, 0);
+    assert.equal(target.requests.length, 2);
+    assert.deepEqual(target.requests.map((request) => request.authorization), [null, null]);
+    assert.ok(!output.includes(TOKEN));
+  });
+
   test("a second attempt that answers 200 posts nothing and exits 0", async () => {
     const { target, hook } = await setup([{ status: 500 }, { status: 200 }]);
     const { code, output } = await runCheck("healthz", testEnv(target, hook));
@@ -127,6 +139,49 @@ describe("two failed attempts", () => {
     assert.match(postedText(hook.posts[0]), /\(no answer, then no answer\)/);
   });
 
+  // A response that stops after its status line, or whose body passes 1 MiB, is no answer even
+  // though curl printed the status it had received (security audit of 2026-11-21, Watch S9 a, b).
+  test("a response that sends its head and then stalls past the timeout is no answer", async () => {
+    const { target, hook } = await setup([{ status: 200, bodyDelayMs: 3000 }]);
+    const started = Date.now();
+    const { code, output } = await runCheck("healthz", testEnv(target, hook));
+    assert.equal(code, 1);
+    assert.ok(Date.now() - started < 3000, "the script waited for the stalled body");
+    assert.equal(target.requests.length, 2);
+    assert.match(output, /healthz attempt 1: no answer\nhealthz attempt 2: no answer/);
+    assert.match(postedText(hook.posts[0]), /\(no answer, then no answer\)/);
+  });
+
+  test("a 200 body of 1 MiB plus one byte is no answer on both attempts and posts", async () => {
+    const { target, hook } = await setup([{ status: 200, body: "x".repeat(1048577) }]);
+    const { code, output } = await runCheck("healthz", testEnv(target, hook));
+    assert.equal(code, 1);
+    assert.equal(target.requests.length, 2);
+    assert.match(output, /healthz attempt 1: no answer\nhealthz attempt 2: no answer/);
+    assert.equal(hook.posts.length, 1);
+    assert.match(postedText(hook.posts[0]), /^<!channel> A21 /);
+  });
+
+  test("a 200 body of exactly 1 MiB is still a good answer", async () => {
+    const { target, hook } = await setup([{ status: 200, body: "x".repeat(1048576) }]);
+    const { code, output } = await runCheck("healthz", testEnv(target, hook));
+    assert.equal(code, 0);
+    assert.equal(output.trim(), "healthz attempt 1: HTTP 200");
+    assert.equal(hook.posts.length, 0);
+  });
+
+  test("a 401 from healthz (a wrong or revoked token) posts A21 and never echoes the token", async () => {
+    const { target, hook } = await setup([{ status: 401 }]);
+    const { code, output } = await runCheck("healthz", testEnv(target, hook));
+    assert.equal(code, 1);
+    assert.equal(target.requests.length, 2);
+    assert.equal(hook.posts.length, 1);
+    const text = postedText(hook.posts[0]);
+    assert.match(text, /^<!channel> A21 \(S1\): /);
+    assert.match(text, /\(HTTP 401, then HTTP 401\)/);
+    assert.ok(!output.includes(TOKEN) && !text.includes(TOKEN));
+  });
+
   test("a refused connection counts as a failed check", async () => {
     const { target, hook } = await setup([{ status: 200 }]);
     const unreachable = { ...target, url: "http://127.0.0.1:1/healthz" };
@@ -158,6 +213,28 @@ describe("two failed attempts", () => {
     const { code, output } = await runCheck("healthz", testEnv(target, hook));
     assert.equal(code, 1);
     assert.match(output, /alert post: HTTP 500/);
+  });
+
+  // Every way the alert post can fail is named in the log and the run still fails (security
+  // audit of 2026-11-21, Watch S9 d).
+  for (const [status, line] of [[403, "alert post: HTTP 403"], [404, "alert post: HTTP 404"]]) {
+    test(`a webhook that answers ${status} is reported as such and the run still fails`, async () => {
+      const { target, hook } = await setup([{ status: 500 }], status);
+      const { code, output } = await runCheck("healthz", testEnv(target, hook));
+      assert.equal(code, 1);
+      assert.equal(hook.posts.length, 1);
+      assert.match(output, new RegExp(`^${line}$`, "m"));
+    });
+  }
+
+  test("a webhook that is closed is reported as no answer and the run still fails", async () => {
+    const { target, hook } = await setup([{ status: 500 }]);
+    const closed = "http://127.0.0.1:1/services/T000/B000/HOOKSECRET9d41c7e2";
+    const { code, output } = await runCheck("healthz", testEnv(target, hook, { WATCH_WEBHOOK: closed }));
+    assert.equal(code, 1);
+    assert.equal(hook.posts.length, 0);
+    assert.match(output, /^alert post: no answer$/m);
+    assert.ok(!output.includes("HOOKSECRET9d41c7e2"));
   });
 
   test("every failing run posts again and a later good run posts no recovery message", async () => {
@@ -234,6 +311,12 @@ describe("configuration errors stop the run before any request", () => {
     ["an address with a user name", (env) => ({ ...env, WATCH_URL: env.WATCH_URL.replace("://", "://user:pw@") }), "The address to check holds a user name, a query or a fragment."],
     ["an address with a query", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}?t=1` }), "The address to check holds a user name, a query or a fragment."],
     ["an address with a fragment", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}#x` }), "The address to check holds a user name, a query or a fragment."],
+    ["a token with a space", (env) => ({ ...env, WATCH_TOKEN: `${env.WATCH_TOKEN} x` }), "The check-in token holds whitespace."],
+    ["a token with a newline", (env) => ({ ...env, WATCH_TOKEN: `${env.WATCH_TOKEN}\nx` }), "The check-in token holds whitespace."],
+    ["a token with a tab", (env) => ({ ...env, WATCH_TOKEN: `${env.WATCH_TOKEN}\tx` }), "The check-in token holds whitespace."],
+    ["a webhook with a space", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK} x` }), "The alert webhook holds a character that is not allowed."],
+    ["a webhook with a newline", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}\nx` }), "The alert webhook holds a character that is not allowed."],
+    ["an address with a space", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL} x` }), "The address to check holds a character that is not allowed."],
     ["a webhook with braces", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/{a,b}` }), "The alert webhook holds a character that is not allowed."],
     ["a webhook with brackets", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/[1-3]` }), "The alert webhook holds a character that is not allowed."],
     ["a webhook with a comma", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/a,b` }), "The alert webhook holds a character that is not allowed."],

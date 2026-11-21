@@ -15,7 +15,10 @@ export const HOOK_SECRET = "HOOKSECRET9d41c7e2";
 
 /**
  * Starts a server that answers its requests from `responses` in order and
- * repeats the last one. Each response is { status, body, delayMs, location }.
+ * repeats the last one. Each response is { status, body, delayMs, bodyDelayMs,
+ * location }: `delayMs` waits before the status line and the body together;
+ * `bodyDelayMs` sends the status line and the headers at once and the body only
+ * after that wait (a response that stalls after its head).
  * `requests` records the path and the Authorization header of every request.
  */
 export async function startTarget(responses) {
@@ -23,10 +26,15 @@ export async function startTarget(responses) {
   const server = createServer((req, res) => {
     const index = Math.min(requests.length, responses.length - 1);
     requests.push({ url: req.url, authorization: req.headers.authorization ?? null });
-    const { status = 200, body = "", delayMs = 0, location } = responses[index];
+    const { status = 200, body = "", delayMs = 0, bodyDelayMs = 0, location } = responses[index];
     setTimeout(() => {
       res.writeHead(status, location ? { location } : {});
-      res.end(body);
+      if (bodyDelayMs > 0) {
+        res.flushHeaders();
+        setTimeout(() => res.end(body), bodyDelayMs);
+      } else {
+        res.end(body);
+      }
     }, delayMs);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
