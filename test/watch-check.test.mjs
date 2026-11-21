@@ -205,6 +205,9 @@ describe("secrets and the public log", () => {
     const script = readFileSync(CHECK_SCRIPT, "utf8").split("\n").filter((line) => !/^\s*#/.test(line));
     const common = script.find((line) => /^\s*local common=\(/.test(line)) ?? "";
     for (const option of ["-q", "--noproxy '*'", "--globoff"]) assert.ok(common.includes(` ${option} `) || common.includes(`(${option} `), `common: ${option}`);
+    // The limits that bound what a request may follow, read or fetch (security audit of
+    // 2026-11-21, Watch h20): no redirect, at most 1 MiB, only the protocol of $proto.
+    for (const option of ['--max-time "$timeout"', "--max-redirs 0", "--max-filesize 1048576", '--proto "$proto"']) assert.ok(common.includes(` ${option} `), `common: ${option}`);
     const curlLines = script.filter((line) => line.includes("curl "));
     assert.equal(curlLines.length, 3);
     for (const line of curlLines) {
