@@ -52,6 +52,15 @@ die() {
   exit "${2:-1}"
 }
 
+# The last line git wrote to the file $work/git.err, if any: it tells a failing
+# hook, a signing error or a refused clone apart from a missing identity. The
+# default remote carries no credential in its URL.
+show_git_error() {
+  if [ -s "$work/git.err" ]; then
+    echo "git: $(tail -n 1 "$work/git.err")"
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --remote) [ "$#" -ge 2 ] || die "--remote needs a value." 2; remote="$2"; shift 2 ;;
@@ -71,7 +80,10 @@ work="$(mktemp -d)" || die "No temporary directory."
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 
-git clone --quiet --branch "$branch" --single-branch -- "$remote" "$repo" >/dev/null 2>&1 || die "The branch $branch could not be cloned from the remote."
+git clone --quiet --branch "$branch" --single-branch -- "$remote" "$repo" >/dev/null 2>"$work/git.err" || {
+  show_git_error
+  die "The branch $branch could not be cloned from the remote."
+}
 # `git clone --branch` also accepts a tag, which leaves HEAD detached; a push of
 # it would create a new branch named after the tag instead of advancing one.
 [ "$(git -C "$repo" symbolic-ref -q HEAD 2>/dev/null)" = "refs/heads/$branch" ] || die "$branch is not a branch of the remote."
@@ -81,7 +93,10 @@ message="Keepalive $(date -u +%Y-%m-%d)
 Empty commit that keeps the scheduled workflows enabled: GitHub disables them
 after 60 days without repository activity."
 
-git -C "$repo" -c user.useConfigOnly=true commit --quiet --allow-empty -m "$message" >/dev/null 2>&1 || die "The commit could not be created. Set user.name and user.email (git config --global) and run again."
+git -C "$repo" -c user.useConfigOnly=true commit --quiet --allow-empty -m "$message" >/dev/null 2>"$work/git.err" || {
+  show_git_error
+  die "The commit could not be created. Set user.name and user.email (git config --global) if the line above says that no identity is configured, and run again."
+}
 
 sha="$(git -C "$repo" rev-parse --short=12 HEAD)"
 

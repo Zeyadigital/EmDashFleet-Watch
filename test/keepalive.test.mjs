@@ -82,6 +82,28 @@ describe("keepalive.sh", () => {
     assert.equal(bareGit("rev-parse", "main"), before);
   });
 
+  // A failing hook, a signing error or a refused clone was reported as a missing identity or a
+  // missing branch; the last line git wrote now comes first (security audit of 2026-11-21, Watch S6).
+  test("a failing pre-commit hook is shown as the cause of a failed commit, not as a missing identity", () => {
+    const hooks = join(dir, "hooks-fail");
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\necho 'hook says no: policy check failed' >&2\nexit 1\n");
+    chmodSync(join(hooks, "pre-commit"), 0o755);
+    const hookConfig = join(dir, "hook.gitconfig");
+    writeFileSync(hookConfig, `${readFileSync(config, "utf8")}[core]\n\thooksPath = ${hooks}\n`);
+    const before = bareGit("rev-parse", "main");
+    const { code, output } = keepalive([], { gitConfig: hookConfig });
+    assert.equal(code, 1);
+    assert.match(output, /^git: hook says no: policy check failed\nThe commit could not be created\./);
+    assert.equal(bareGit("rev-parse", "main"), before);
+  });
+
+  test("a clone that git refuses shows git's last line before the message", () => {
+    const { code, output } = keepalive(["--branch", "nope"]);
+    assert.equal(code, 1);
+    assert.match(output, /^git: .+\nThe branch nope could not be cloned from the remote\.$/);
+  });
+
   test("a tag given as --branch is refused, and no branch named after it is created", () => {
     for (const tag of ["v1", "light1"]) {
       const { code, output } = keepalive(["--branch", tag]);
