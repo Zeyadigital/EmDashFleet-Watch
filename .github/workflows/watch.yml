@@ -29,7 +29,12 @@ name: watch
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Every 15 minutes, at minutes 7,22,37,52: GitHub documents the start of every
+    # hour as a high-load time at which a scheduled run can be delayed or
+    # dropped and advises "a different time of the hour"
+    # (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule),
+    # so no minute is 0. The two workflows use different minutes.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:

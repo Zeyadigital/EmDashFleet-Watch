@@ -15,6 +15,7 @@ const WORKFLOWS = {
   "watch.yml": {
     name: "watch",
     group: "watch",
+    cron: "7,22,37,52 * * * *",
     healthzUrl: "https://app.emdashfleet.com/healthz",
     landingUrl: "https://emdashfleet.com/",
     tokenSecret: "WATCH_CHECKIN_TOKEN",
@@ -24,6 +25,7 @@ const WORKFLOWS = {
   "watch-staging.yml": {
     name: "watch-staging",
     group: "watch-staging",
+    cron: "12,27,42,57 * * * *",
     healthzUrl: "https://staging.emdashfleet.com/healthz",
     landingUrl: "${{ vars.STAGING_SITE_URL }}",
     tokenSecret: "WATCH_CHECKIN_TOKEN_STAGING",
@@ -62,8 +64,15 @@ for (const [file, want] of Object.entries(WORKFLOWS)) {
     test("is named, and triggers on a 15 minute schedule and by hand only", () => {
       const text = code(file);
       assert.match(text, new RegExp(`^name: ${want.name}$`, "m"));
-      assert.match(text, /^on:\n  schedule:\n    - cron: "\*\/15 \* \* \* \*"\n  workflow_dispatch:\n\npermissions:/m);
+      assert.ok(text.includes(`on:\n  schedule:\n    - cron: "${want.cron}"\n  workflow_dispatch:\n\npermissions:`), `cron is ${want.cron}`);
       assert.equal(text.match(/cron:/g).length, 1);
+      // Every 15 minutes, none of them minute 0: the start of every hour is a documented
+      // high-load time at which a scheduled run can be delayed or dropped (security audit of
+      // 2026-11-21, Watch S13). The two workflows never share a minute.
+      const minutes = want.cron.split(" ")[0].split(",").map(Number);
+      assert.deepEqual(minutes.map((minute, i) => (minutes[(i + 1) % minutes.length] - minute + 60) % 60), [15, 15, 15, 15]);
+      assert.ok(!minutes.includes(0), "no run at the start of the hour");
+      assert.match(want.cron, /^\d{1,2}(,\d{1,2}){3} \* \* \* \*$/);
       for (const trigger of ["push", "pull_request", "pull_request_target", "workflow_run", "issue_comment", "repository_dispatch"]) {
         assert.doesNotMatch(text, new RegExp(`^  ${trigger}:`, "m"));
       }
@@ -163,11 +172,18 @@ describe("production and staging", () => {
   const production = code("watch.yml").split("\n");
   const staging = code("watch-staging.yml").split("\n");
 
+  test("the two workflows run at different minutes", () => {
+    const minutes = (file) => /cron: "([\d,]+) /.exec(code(file))[1].split(",");
+    const shared = minutes("watch.yml").filter((minute) => minutes("watch-staging.yml").includes(minute));
+    assert.deepEqual(shared, []);
+  });
+
   test("watch-staging.yml is watch.yml with only the staging values changed", () => {
     assert.equal(staging.length, production.length);
     const differing = production.flatMap((line, index) => (line === staging[index] ? [] : [[line.trim(), staging[index].trim()]]));
     assert.deepEqual(differing, [
       ["name: watch", "name: watch-staging"],
+      ['- cron: "7,22,37,52 * * * *"', '- cron: "12,27,42,57 * * * *"'],
       ["group: watch", "group: watch-staging"],
       ["WATCH_URL: https://app.emdashfleet.com/healthz", "WATCH_URL: https://staging.emdashfleet.com/healthz"],
       ["WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN }}", "WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN_STAGING }}"],
