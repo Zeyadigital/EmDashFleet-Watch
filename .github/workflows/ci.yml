@@ -57,8 +57,11 @@ jobs:
           # --text renders every commit of the range as text, so a -diff or
           # binary attribute, or a NUL early in a file, does not hide a token
           # from gitleaks behind "Binary files ... differ" (security audit of
-          # 2026-11-21, Watch h11).
-          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="--text ${BASE_SHA}..${HEAD_SHA}" .
+          # 2026-11-21, Watch h11). -m shows each merge commit's diff against
+          # every parent: git log -p prints no diff for a merge by default, so
+          # a token added while resolving a merge would pass unscanned
+          # (security audit of 2026-11-21, Watch v04).
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="--text -m ${BASE_SHA}..${HEAD_SHA}" .
 
       # No lockfile and no dependency: no cache and no install. Node.js 26.13.0
       # bundles the npm that runs the tests.

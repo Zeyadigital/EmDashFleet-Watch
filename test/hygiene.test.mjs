@@ -3,6 +3,7 @@
 // the absence of dependencies and the workflow ci.yml. Workflow files are parsed as
 // text, without a YAML package, like test/workflows.test.mjs. Run with `npm test`.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -96,7 +97,7 @@ describe("ci.yml", () => {
     assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
     assert.match(text, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
     assert.match(text, /git rev-list --quiet "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
-    assert.match(text, /gitleaks" git .*--log-opts="--text \$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
+    assert.match(text, /gitleaks" git .*--log-opts="--text -m \$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
   });
 
   test("takes Node.js from .nvmrc and runs npm test", () => {
@@ -111,6 +112,19 @@ describe("every workflow", () => {
       const uses = read(`.github/workflows/${file}`).split("\n").filter((line) => /^\s*(?:- )?uses: /.test(line));
       assert.ok(uses.length > 0, file);
       for (const line of uses) assert.match(line, /uses: [\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*$/, `${file}: ${line.trim()}`);
+    }
+  });
+});
+
+describe("scripts", () => {
+  // A syntax error in a script surfaces only when a scheduled run reaches it,
+  // so every script is parsed here (security audit of 2026-11-21).
+  test("every script under scripts/ parses with bash -n", () => {
+    const scripts = readdirSync(join(ROOT, "scripts")).filter((name) => name.endsWith(".sh")).sort();
+    assert.deepEqual(scripts, ["keepalive.sh", "watch-check.sh"]);
+    for (const name of scripts) {
+      const result = spawnSync("bash", ["-n", join(ROOT, "scripts", name)], { encoding: "utf8", env: { PATH: process.env.PATH } });
+      assert.equal(result.status, 0, `${name}: ${result.stderr}`);
     }
   });
 });

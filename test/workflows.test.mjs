@@ -85,7 +85,9 @@ for (const [file, want] of Object.entries(WORKFLOWS)) {
       assert.equal(text.match(/^  [a-z-]+:$/gm).filter((key) => key !== "  schedule:").length, 1);
       const minutes = Number(/timeout-minutes: (\d+)/.exec(text)?.[1]);
       assert.ok(minutes >= 12 && minutes <= 30, `timeout-minutes is ${minutes}`);
-      assert.match(text, /runs-on: ubuntu-latest/);
+      assert.match(text, /^ {4}runs-on: ubuntu-latest$/m);
+      // The checkout holds the scripts folder only (security audit of 2026-11-21).
+      assert.match(text, /^ {10}sparse-checkout: scripts$/m);
       assert.doesNotMatch(text, /continue-on-error/);
     });
 
