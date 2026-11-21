@@ -1,10 +1,14 @@
 # Weekly version updates of every GitHub Action of the outside watch (app plan,
 # Security (Template supply chain); CLAUDE.md Versions constraint; tracker
 # APB-001, APC-005). Pull requests target dev, where pushes go (HR-162); the
-# newest stable release is proposed, a co-founder merges it. GitHub Actions is
-# the only ecosystem in use: package.json holds no dependency (test/hygiene.test.mjs
-# fails when one appears, and then an npm entry is added here), and the check
-# script is plain bash and curl.
+# newest stable release is proposed, a co-founder merges it. A release is
+# proposed 7 days after it is published, not the week it lands (without a
+# cooldown Dependabot applies a default of 3 days), so a release GitHub
+# withdraws in its first days never reaches a pull request; a security update
+# ignores the cooldown. GitHub Actions is the only ecosystem in use:
+# package.json holds no dependency (test/hygiene.test.mjs fails when one
+# appears, and then an npm entry is added here), and the check script is plain
+# bash and curl.
 # https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 version: 2
 updates:
@@ -13,3 +17,5 @@ updates:
     target-branch: dev
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7

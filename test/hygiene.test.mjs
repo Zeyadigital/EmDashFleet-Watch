@@ -25,6 +25,16 @@ describe("dependabot.yml", () => {
     assert.match(text, /^ {6}interval: weekly$/m);
   });
 
+  // The plan (Operations, Versions) proposes a release at the earliest 7 days after it is
+  // published; without a cooldown Dependabot applies a default of 3 days. Every entry carries it
+  // (security audit of 2026-11-21, Watch S14).
+  test("every entry waits 7 days after a release before proposing it", () => {
+    const entries = text.match(/^ {2}- package-ecosystem: /gm)?.length;
+    assert.ok(entries >= 1);
+    assert.equal(text.match(/^ {4}cooldown:\n {6}default-days: 7$/gm)?.length, entries);
+    assert.equal(text.match(/default-days:/g)?.length, entries);
+  });
+
   test("covers every ecosystem in use: package.json holds no dependency and there is no other manifest", () => {
     const manifest = JSON.parse(read("package.json"));
     for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
