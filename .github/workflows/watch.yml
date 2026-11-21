@@ -35,6 +35,18 @@ on:
 permissions:
   contents: read
 
+# One run of this workflow at a time: a manual dispatch inside the window of a
+# run in progress, or two delayed scheduled runs that start together, would
+# otherwise post <!channel> twice and write two check-ins. cancel-in-progress
+# is false, so a run in progress is never cancelled; a newer run waits, and
+# GitHub keeps at most one run pending in the group and replaces an older
+# pending run by the newer one, which suits a live probe (workflow syntax,
+# concurrency:
+# https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
 jobs:
   watch:
     runs-on: ubuntu-latest

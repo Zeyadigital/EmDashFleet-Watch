@@ -14,6 +14,7 @@ const CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 const WORKFLOWS = {
   "watch.yml": {
     name: "watch",
+    group: "watch",
     healthzUrl: "https://app.emdashfleet.com/healthz",
     landingUrl: "https://emdashfleet.com/",
     tokenSecret: "WATCH_CHECKIN_TOKEN",
@@ -22,6 +23,7 @@ const WORKFLOWS = {
   },
   "watch-staging.yml": {
     name: "watch-staging",
+    group: "watch-staging",
     healthzUrl: "https://staging.emdashfleet.com/healthz",
     landingUrl: "${{ vars.STAGING_SITE_URL }}",
     tokenSecret: "WATCH_CHECKIN_TOKEN_STAGING",
@@ -69,8 +71,22 @@ for (const [file, want] of Object.entries(WORKFLOWS)) {
 
     test("declares permissions contents: read and no other permission", () => {
       const text = code(file);
-      assert.match(text, /^permissions:\n  contents: read\n\njobs:/m);
+      assert.match(text, /^permissions:\n  contents: read\n\nconcurrency:/m);
       assert.equal(text.match(/permissions:/g).length, 1);
+    });
+
+    // A run in progress is never cancelled and only one run of the workflow is in progress at a
+    // time, so a dispatch inside the window of a run, or two delayed scheduled runs, cannot post
+    // <!channel> or write a check-in twice (security audit of 2026-11-21, Watch S3). The groups
+    // of the two files differ, so a staging run never waits for a production run.
+    test("runs one run of the workflow at a time and never cancels the one in progress", () => {
+      const text = code(file);
+      assert.match(
+        text,
+        new RegExp(`^permissions:\\n  contents: read\\n\\nconcurrency:\\n  group: ${want.group}\\n  cancel-in-progress: false\\n\\njobs:`, "m"),
+      );
+      assert.equal(text.match(/^concurrency:/gm).length, 1);
+      assert.doesNotMatch(text, /cancel-in-progress: true/);
     });
 
     test("pins every action by full commit SHA with its version", () => {
@@ -152,6 +168,7 @@ describe("production and staging", () => {
     const differing = production.flatMap((line, index) => (line === staging[index] ? [] : [[line.trim(), staging[index].trim()]]));
     assert.deepEqual(differing, [
       ["name: watch", "name: watch-staging"],
+      ["group: watch", "group: watch-staging"],
       ["WATCH_URL: https://app.emdashfleet.com/healthz", "WATCH_URL: https://staging.emdashfleet.com/healthz"],
       ["WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN }}", "WATCH_TOKEN: ${{ secrets.WATCH_CHECKIN_TOKEN_STAGING }}"],
       ["WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL }}", "WATCH_WEBHOOK: ${{ secrets.SLACK_WATCH_WEBHOOK_URL_STAGING }}"],
