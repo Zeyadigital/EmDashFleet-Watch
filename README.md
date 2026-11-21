@@ -16,6 +16,12 @@ Checks EmDash Fleet from outside Cloudflare. The scheduled workflows `watch.yml`
 - `scripts/watch-check.sh` is the one check script of the workflows. It needs `bash` and `curl` only and prints nothing but each URL's HTTP status.
 - `scripts/keepalive.sh` is run by the monthly privileged-access review. GitHub disables scheduled workflows in a public repository after 60 days without activity, so the script pushes one empty commit, made with the operator's own configured git identity (it refuses to run when `user.name` and `user.email` are not set, instead of letting git guess them), to `main` as a fast-forward, from a temporary clone. Run it as `bash scripts/keepalive.sh` (add `--dry-run` to push nothing and `--check-state` to read the state of `watch.yml` and `watch-staging.yml` with `gh` afterwards, also in a dry run). It is a push to `main` like any other.
 
+## What `ci.yml` and Dependabot do and do not cover
+
+- `ci.yml` is a signal after the push, not a gate: `watch.yml` runs from `main` on its schedule with no dependency on the result of `ci.yml`, so a green `npm test` is not an approval of a change.
+- The pull requests that Dependabot opens into `dev` are its version updates. A Dependabot security update always uses the default branch (https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference), so if security updates are enabled for this repository, the pull request for an advisory on an action opens against `main`, runs `ci.yml` before the merge, needs the `CHECKOUT` constant of `test/workflows.test.mjs` edited in the same change, and `main` must be merged into `dev` before the next push of `dev` to `main`.
+- The gitleaks version and its SHA-256 in `ci.yml` and `.nvmrc` are raised by hand: `dependabot.yml` tracks GitHub Actions only, so no updater covers them, and the monthly privileged-access review (above) is where they are compared with the newest stable release.
+
 ## Tests
 
 The tests need Node.js 26.13.0 or newer (`.nvmrc`) and no package: `npm test` runs `node --test "test/*.test.mjs"`. They run the check script against a local HTTP server and a stub webhook, parse the workflow files and check the hygiene files (`test/hygiene.test.mjs`). They never reach a real address or a real webhook.
