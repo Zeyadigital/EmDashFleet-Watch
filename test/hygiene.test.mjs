@@ -51,6 +51,47 @@ describe("gitleaks", () => {
     }
     assert.match(read("CONTRIBUTING.md"), /gitleaks 8\.30\.1/);
   });
+
+  // The default configuration that useDefault pulls in exempts whole paths from every
+  // rule, and .gitleaks.toml cannot remove an entry, so a secret committed under one of
+  // these paths is never reported (security audit of 2026-11-21, Watch h15). The list
+  // is the global allowlist of gitleaks 8.30.1 (`strings` over the release binary,
+  // section "global allow lists"); re-read it whenever GITLEAKS_VERSION changes.
+  test("no tracked file sits in a path the gitleaks 8.30.1 default exempts, other than .gitleaks.toml", () => {
+    const exempt = [
+    String.raw`gitleaks\.toml`,
+    String.raw`(?i)\.(?:bmp|gif|jpe?g|png|svg|tiff?)$`,
+    String.raw`(?i)\.(?:eot|[ot]tf|woff2?)$`,
+    String.raw`(?i)\.(?:docx?|xlsx?|pdf|bin|socket|vsidx|v2|suo|wsuo|.dll|pdb|exe|gltf)$`,
+    String.raw`go\.(?:mod|sum|work(?:\.sum)?)$`,
+    String.raw`(?:^|/)vendor/modules\.txt$`,
+    String.raw`(?:^|/)vendor/(?:github\.com|golang\.org/x|google\.golang\.org|gopkg\.in|istio\.io|k8s\.io|sigs\.k8s\.io)(?:/.*)?$`,
+    String.raw`(?:^|/)gradlew(?:\.bat)?$`,
+    String.raw`(?:^|/)gradle\.lockfile$`,
+    String.raw`(?:^|/)mvnw(?:\.cmd)?$`,
+    String.raw`(?:^|/)\.mvn/wrapper/MavenWrapperDownloader\.java$`,
+    String.raw`(?:^|/)node_modules(?:/.*)?$`,
+    String.raw`(?:^|/)(?:deno\.lock|npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$`,
+    String.raw`(?:^|/)bower_components(?:/.*)?$`,
+    String.raw`(?:^|/)(?:angular|bootstrap|jquery(?:-?ui)?|plotly|swagger-?ui)[a-zA-Z0-9.-]*(?:\.min)?\.js(?:\.map)?$`,
+    String.raw`(?:^|/)javascript\.json$`,
+    String.raw`(?:^|/)(?:Pipfile|poetry)\.lock$`,
+    String.raw`(?i)(?:^|/)(?:v?env|virtualenv)/lib(?:64)?(?:/.*)?$`,
+    String.raw`(?i)(?:^|/)(?:lib(?:64)?/python[23](?:\.\d{1,2})+|python/[23](?:\.\d{1,2})+/lib(?:64)?)(?:/.*)?$`,
+    String.raw`(?i)(?:^|/)[a-z0-9_.]+-[0-9.]+\.dist-info(?:/.+)?$`,
+    String.raw`(?:^|/)vendor/(?:bundle|ruby)(?:/.*?)?$`,
+    String.raw`\.gem$`,
+    String.raw`verification-metadata\.xml`,
+    String.raw`Database.refactorlog`,
+    String.raw`(?:^|/)\.git$`,
+    ].map((pattern) => (pattern.startsWith("(?i)") ? new RegExp(pattern.slice(4), "i") : new RegExp(pattern)));
+    const listed = spawnSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" });
+    assert.equal(listed.status, 0, listed.stderr);
+    const files = listed.stdout.split("\0").filter((file) => file !== "");
+    assert.ok(files.includes("scripts/watch-check.sh"), "git ls-files listed the repository");
+    assert.deepEqual(files.filter((file) => file !== ".gitleaks.toml" && exempt.some((pattern) => pattern.test(file))), []);
+    assert.ok(exempt.some((pattern) => pattern.test("img/logo.PNG")) && exempt.some((pattern) => pattern.test("a/package-lock.json")));
+  });
 });
 
 describe(".nvmrc", () => {
