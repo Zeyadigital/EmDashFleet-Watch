@@ -202,6 +202,9 @@ describe("configuration errors stop the run before any request", () => {
     ["a missing webhook", (env) => ({ ...env, WATCH_WEBHOOK: "" }), "The alert webhook is not set."],
     ["a missing token for healthz", (env) => ({ ...env, WATCH_TOKEN: "" }), "The check-in token is not set."],
     ["an unknown environment", (env) => ({ ...env, WATCH_ENVIRONMENT: "dev" }), "WATCH_ENVIRONMENT is neither production nor staging."],
+    ["an address with a user name", (env) => ({ ...env, WATCH_URL: env.WATCH_URL.replace("://", "://user:pw@") }), "The address to check holds a user name, a query or a fragment."],
+    ["an address with a query", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}?t=1` }), "The address to check holds a user name, a query or a fragment."],
+    ["an address with a fragment", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}#x` }), "The address to check holds a user name, a query or a fragment."],
   ];
   for (const [name, change, message] of cases) {
     test(name, async () => {

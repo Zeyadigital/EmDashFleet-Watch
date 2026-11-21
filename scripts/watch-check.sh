@@ -76,6 +76,9 @@ fail_config() {
 [ -n "$url" ] || fail_config "The address to check is not set."
 case "$url" in "$url_prefix"*) ;; *) fail_config "The address to check is not an https address." ;; esac
 case "$url" in *[[:space:]\"\\]*) fail_config "The address to check holds a character that is not allowed." ;; esac
+# The address is printed in the public Actions log, so it may carry no user
+# name, password, query or fragment (security audit of 2026-11-21, Watch h16).
+case "$url" in *[@?#]*) fail_config "The address to check holds a user name, a query or a fragment." ;; esac
 [ -n "$webhook" ] || fail_config "The alert webhook is not set."
 case "$webhook" in "$webhook_prefix"*) ;; *) fail_config "The alert webhook is not a Slack Incoming Webhook address." ;; esac
 case "$webhook" in *[[:space:]\"\\]*) fail_config "The alert webhook holds a character that is not allowed." ;; esac

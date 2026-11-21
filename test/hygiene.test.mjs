@@ -68,6 +68,8 @@ describe("ci.yml", () => {
     assert.match(text, /^on:\n {2}push:\n {4}branches: \[dev, main\]\n {2}pull_request:\n {4}branches: \[dev, main\]\n/m);
     assert.match(text, /^permissions:\n {2}contents: read\n(?! {2}\S)/m);
     assert.match(text, /^ {4}timeout-minutes: \d+$/m);
+    // A GitHub-hosted runner, named by its exact label (security audit of 2026-11-21, Watch h16).
+    assert.deepEqual(text.match(/^\s*runs-on:.*$/gm), ["    runs-on: ubuntu-latest"]);
   });
 
   test("uses no secret, no deploy and no Slack post, and no expression inside a run: script", () => {
