@@ -5,9 +5,10 @@
 # the repository, the job uses no secret (the secrets of watch.yml and
 # watch-staging.yml are never available to a pull request from a fork anyway),
 # every action is pinned by full commit SHA, and the job deploys and posts
-# nothing: it runs gitleaks 8.30.1 over the commits of the push or pull request
-# and the tests, which reach no real address and no real webhook (README). The
-# workflows that watch Fleet run from main only (watch.yml).
+# nothing: it runs gitleaks 8.30.1 over the whole history of every ref for a
+# push and over the commits of a pull request, and the tests, which reach no
+# real address and no real webhook (README). The workflows that watch Fleet run
+# from main only (watch.yml).
 name: ci
 
 on:
@@ -22,8 +23,8 @@ permissions:
 # A pull request's runs share one group and a newer one cancels the older. A
 # push run has a group of its own (its run id): in a shared group GitHub
 # replaces a run still pending by a newer pending one whatever
-# cancel-in-progress says, and a replaced push run would leave its commit range
-# (github.event.before..github.sha, the gitleaks step) unscanned.
+# cancel-in-progress says, and a replaced push run would leave its commit
+# unscanned until the next push, whose scan covers the whole history again.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -44,34 +45,62 @@ jobs:
         env:
           GITLEAKS_VERSION: 8.30.1
           GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           archive="$RUNNER_TEMP/gitleaks.tar.gz"
           curl -fsSL -o "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
-          # gitleaks 8.30.1 exits 0 when its git log fails, so a range that
-          # does not resolve would pass unscanned.
-          git rev-list --quiet "${BASE_SHA}..${HEAD_SHA}"
+          # A push scans the whole history of every ref, not the commits since
+          # the previous push: a range that starts at github.event.before ("The
+          # SHA of the most recent commit on ref before the push",
+          # https://docs.github.com/en/webhooks/webhook-events-and-payloads#push)
+          # leaves unscanned the commits of a run that was cancelled, replaced or
+          # never created, of the first push of a ref, of a force-push and of a
+          # push whose head commit holds a skip marker, so no cursor is kept
+          # (security audit of 2026-11-21, Watch S1). The full history (fetch-depth
+          # 0) holds a few dozen commits. GITHUB_EVENT_NAME is the name of the event
+          # that triggered the run
+          # (https://docs.github.com/en/actions/reference/workflows-and-actions/variables);
+          # anything but a pull request is scanned as a push. A pull request
+          # scans its own commits, from github.event.pull_request.base.sha, which
+          # a push payload does not have
+          # (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts:
+          # a property that does not exist evaluates to an empty string).
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            revs="${BASE_SHA}..${HEAD_SHA}"
+            # gitleaks 8.30.1 exits 0 when its git log fails, so a range that
+            # does not resolve would pass unscanned.
+            git rev-list --quiet "$revs"
+          else
+            revs="--all ${HEAD_SHA}"
+          fi
+          log_opts="--text -m --full-history ${revs}"
+          # The same exit 0 hides an option or a revision that the runner's git
+          # rejects, so the step runs the selection once itself and fails on it.
+          # $revs is unquoted on purpose: it holds only --all, a commit SHA or
+          # a range of two SHAs.
+          git log --text -m -n1 $revs >/dev/null
           # git classes a file with a NUL byte (UTF-16 text included) as binary,
           # and gitleaks cannot match a token whose characters NUL bytes
           # interleave even when --text renders it, so the step refuses every
-          # file git counts as binary in the range; the repository holds none
-          # (security audit of 2026-11-21, Watch v08).
-          binary="$(git log --numstat --format= --no-renames -m "${BASE_SHA}..${HEAD_SHA}" | awk -F'\t' '$1 == "-" && $2 == "-" { print $3 }' | sort -u)"
+          # file git counts as binary in the selection; the repository holds
+          # none (security audit of 2026-11-21, Watch v08).
+          binary="$(git log --numstat --format= --no-renames -m $revs | awk -F'\t' '$1 == "-" && $2 == "-" { print $3 }' | sort -u)"
           if [ -n "$binary" ]; then
             printf 'Files git classes as binary cannot be scanned for secrets:\n%s\n' "$binary"
             exit 1
           fi
-          # --text renders every commit of the range as text, so a -diff or
+          # --text renders every commit of the selection as text, so a -diff or
           # binary attribute, or a NUL early in a file, does not hide a token
           # from gitleaks behind "Binary files ... differ" (security audit of
           # 2026-11-21, Watch h11). -m shows each merge commit's diff against
           # every parent: git log -p prints no diff for a merge by default, so
           # a token added while resolving a merge would pass unscanned
-          # (security audit of 2026-11-21, Watch v04).
-          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="--text -m ${BASE_SHA}..${HEAD_SHA}" .
+          # (security audit of 2026-11-21, Watch v04). --full-history --all is
+          # what gitleaks itself selects when it is given no --log-opts.
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="$log_opts" .
 
       # No lockfile and no dependency: no cache and no install. Node.js 26.13.0
       # bundles the npm that runs the tests.

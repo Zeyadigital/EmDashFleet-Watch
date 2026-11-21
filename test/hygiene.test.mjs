@@ -125,7 +125,7 @@ describe("ci.yml", () => {
       [
         "group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
-        "BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}",
+        "BASE_SHA: ${{ github.event.pull_request.base.sha }}",
         "HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
       ],
     );
@@ -146,21 +146,38 @@ describe("ci.yml", () => {
     assert.doesNotMatch(scripts.join("\n"), /\$\{\{/);
   });
 
-  test("runs gitleaks 8.30.1 over the commits of the push or pull request after checking the archive", () => {
+  test("runs gitleaks 8.30.1 over the whole history for a push and the commits of a pull request after checking the archive", () => {
     assert.match(text, /fetch-depth: 0/);
     assert.match(text, /GITLEAKS_VERSION: 8\.30\.1$/m);
     assert.match(text, /GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb$/m);
     assert.match(text, /sha256sum --check --strict/);
-    assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
+    assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}$/m);
     assert.match(text, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
-    assert.match(text, /git rev-list --quiet "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
-    assert.match(text, /git log --numstat --format= --no-renames -m "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}" \| awk -F'\\t' '\$1 == "-" && \$2 == "-" \{ print \$3 \}'/);
-    assert.ok(text.indexOf("git log --numstat") < text.indexOf('"$RUNNER_TEMP/gitleaks" git'), "the binary guard runs before gitleaks");
+    // A push keeps no cursor: github.event.before never selects the commits to scan, so a
+    // cancelled or never-created run, a first push of a ref, a force-push or a skip marker
+    // cannot exclude a commit; only a pull request scans a range (security audit of
+    // 2026-11-21, Watch S1).
+    assert.doesNotMatch(text, /github\.event\.before|\bBEFORE_SHA\b/);
+    // Exactly one selection per event: a pull request's own commits (with the range gate), and
+    // every other event, a push, scans every ref and the pushed commit.
+    assert.match(
+      text,
+      /^ {10}if \[ "\$GITHUB_EVENT_NAME" = "pull_request" \]; then\n {12}revs="\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"\n(?: {12}#.*\n)* {12}git rev-list --quiet "\$revs"\n {10}else\n {12}revs="--all \$\{HEAD_SHA\}"\n {10}fi\n {10}log_opts="--text -m --full-history \$\{revs\}"$/m,
+    );
+    assert.equal(text.match(/\brevs=/g).length, 2);
+    // The probe: gitleaks 8.30.1 exits 0 when git writes to stderr, so the step itself runs the
+    // selection once and fails on a rejected option or revision.
+    assert.match(text, /^ {10}git log --text -m -n1 \$revs >\/dev\/null$/m);
+    assert.match(text, /git log --numstat --format= --no-renames -m \$revs \| awk -F'\\t' '\$1 == "-" && \$2 == "-" \{ print \$3 \}'/);
+    const at = (needle) => text.indexOf(needle);
+    assert.ok(at("git rev-list --quiet") < at("git log --text -m -n1") && at("git log --text -m -n1") < at("git log --numstat"), "the range gate and the probe run before the binary guard");
+    assert.ok(at("git log --numstat") < at('"$RUNNER_TEMP/gitleaks" git'), "the binary guard runs before gitleaks");
     // The exact scan line, with --redact (a found token never reaches the public log), and
     // nothing in the file that would let a failed check pass: no `|| true`, exit code
     // override, continue-on-error, step or job condition, `exit 0` or other shell
     // (security audit of 2026-11-21, Watch h20).
-    assert.match(text, /^ {10}"\$RUNNER_TEMP\/gitleaks" git --redact --no-banner --verbose --log-opts="--text -m \$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}" \.$/m);
+    assert.match(text, /^ {10}"\$RUNNER_TEMP\/gitleaks" git --redact --no-banner --verbose --log-opts="\$log_opts" \.$/m);
+    assert.equal(text.match(/--log-opts=/g).length, 1);
     assert.doesNotMatch(text, /\|\|\s*(?:true|:)|--exit-code|continue-on-error|^\s*(?:- )?if:|\bexit 0\b|^\s*shell:|set \+e/m);
     assert.match(text, /^ {10}persist-credentials: false$/m);
   });
