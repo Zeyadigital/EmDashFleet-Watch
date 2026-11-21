@@ -96,7 +96,7 @@ describe("ci.yml", () => {
     assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
     assert.match(text, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
     assert.match(text, /git rev-list --quiet "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
-    assert.match(text, /gitleaks" git .*--log-opts="\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
+    assert.match(text, /gitleaks" git .*--log-opts="--text \$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
   });
 
   test("takes Node.js from .nvmrc and runs npm test", () => {
