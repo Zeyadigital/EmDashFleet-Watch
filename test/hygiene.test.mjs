@@ -176,7 +176,10 @@ describe("ci.yml", () => {
     // nothing in the file that would let a failed check pass: no `|| true`, exit code
     // override, continue-on-error, step or job condition, `exit 0` or other shell
     // (security audit of 2026-11-21, Watch h20).
-    assert.match(text, /^ {10}"\$RUNNER_TEMP\/gitleaks" git --redact --no-banner --verbose --log-opts="\$log_opts" \.$/m);
+    // --ignore-gitleaks-allow: the inline allow comment of gitleaks cannot silence a finding
+    // (security audit of 2026-11-21, Watch S2).
+    assert.match(text, /^ {10}"\$RUNNER_TEMP\/gitleaks" git --redact --no-banner --ignore-gitleaks-allow --verbose --log-opts="\$log_opts" \.$/m);
+    assert.doesNotMatch(text, /--baseline-path|\s-b\s|--gitleaks-ignore-path|\s-i\s/);
     assert.equal(text.match(/--log-opts=/g).length, 1);
     assert.doesNotMatch(text, /\|\|\s*(?:true|:)|--exit-code|continue-on-error|^\s*(?:- )?if:|\bexit 0\b|^\s*shell:|set \+e/m);
     assert.match(text, /^ {10}persist-credentials: false$/m);
@@ -194,6 +197,18 @@ describe("every workflow", () => {
   test("is one of ci.yml, watch.yml and watch-staging.yml, and there is no .gitleaksignore", () => {
     assert.deepEqual(WORKFLOWS, ["ci.yml", "watch-staging.yml", "watch.yml"]);
     assert.ok(!readdirSync(ROOT).includes(".gitleaksignore"));
+  });
+
+  // The scan runs with --ignore-gitleaks-allow, so the comment would be inert, but a file that
+  // carries it still reads as an approved finding to a human reviewer. The needle is built from
+  // two parts so that this file does not hold it (security audit of 2026-11-21, Watch S2).
+  test("no tracked file holds the inline allow comment of gitleaks", () => {
+    const needle = "gitleaks:" + "allow";
+    const listed = spawnSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" });
+    assert.equal(listed.status, 0, listed.stderr);
+    const files = listed.stdout.split("\0").filter((file) => file !== "");
+    assert.ok(files.includes("scripts/watch-check.sh"), "git ls-files listed the repository");
+    assert.deepEqual(files.filter((file) => read(file).includes(needle)), []);
   });
 
   test("pins every action by full commit SHA with its version comment", () => {

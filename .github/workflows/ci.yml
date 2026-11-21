@@ -100,7 +100,11 @@ jobs:
           # a token added while resolving a merge would pass unscanned
           # (security audit of 2026-11-21, Watch v04). --full-history --all is
           # what gitleaks itself selects when it is given no --log-opts.
-          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose --log-opts="$log_opts" .
+          # --ignore-gitleaks-allow: a line that carries gitleaks' inline allow
+          # comment would otherwise turn its finding into exit 0 (security audit
+          # of 2026-11-21, Watch S2); no .gitleaksignore and no baseline are
+          # used, and test/hygiene.test.mjs fails when a file holds the comment.
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --ignore-gitleaks-allow --verbose --log-opts="$log_opts" .
 
       # No lockfile and no dependency: no cache and no install. Node.js 26.13.0
       # bundles the npm that runs the tests.
