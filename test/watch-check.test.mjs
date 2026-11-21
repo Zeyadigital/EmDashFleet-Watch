@@ -100,7 +100,7 @@ describe("two failed attempts", () => {
   });
 
   // Only the exact body the dashboard sends is the Cron signal (security audit of 2026-11-21, Watch h18).
-  for (const body of ["cron_\r\nstale", "cron_stale\n", "cron_stale\r\n", "cron_stale and more", "\ncron_stale"]) {
+  for (const body of ["cron_\r\nstale", "cron_stale\n", "cron_stale\r\n", "cron_stale and more", "\ncron_stale", "cron\0_stale", "cron_stale\0", `cron_stale${"\n".repeat(54)}x`]) {
     test(`a 503 whose body is ${JSON.stringify(body)} twice posts A21, not A20`, async () => {
       const { target, hook } = await setup([{ status: 503, body }]);
       const { code } = await runCheck("healthz", testEnv(target, hook));
