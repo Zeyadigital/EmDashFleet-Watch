@@ -140,6 +140,8 @@ describe("ci.yml", () => {
     assert.match(text, /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/);
     assert.match(text, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
     assert.match(text, /git rev-list --quiet "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
+    assert.match(text, /git log --numstat --format= --no-renames -m "\$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}" \| awk -F'\\t' '\$1 == "-" && \$2 == "-" \{ print \$3 \}'/);
+    assert.ok(text.indexOf("git log --numstat") < text.indexOf('"$RUNNER_TEMP/gitleaks" git'), "the binary guard runs before gitleaks");
     assert.match(text, /gitleaks" git .*--log-opts="--text -m \$\{BASE_SHA\}\.\.\$\{HEAD_SHA\}"/);
   });
 

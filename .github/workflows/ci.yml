@@ -54,6 +54,16 @@ jobs:
           # gitleaks 8.30.1 exits 0 when its git log fails, so a range that
           # does not resolve would pass unscanned.
           git rev-list --quiet "${BASE_SHA}..${HEAD_SHA}"
+          # git classes a file with a NUL byte (UTF-16 text included) as binary,
+          # and gitleaks cannot match a token whose characters NUL bytes
+          # interleave even when --text renders it, so the step refuses every
+          # file git counts as binary in the range; the repository holds none
+          # (security audit of 2026-11-21, Watch v08).
+          binary="$(git log --numstat --format= --no-renames -m "${BASE_SHA}..${HEAD_SHA}" | awk -F'\t' '$1 == "-" && $2 == "-" { print $3 }' | sort -u)"
+          if [ -n "$binary" ]; then
+            printf 'Files git classes as binary cannot be scanned for secrets:\n%s\n' "$binary"
+            exit 1
+          fi
           # --text renders every commit of the range as text, so a -diff or
           # binary attribute, or a NUL early in a file, does not hide a token
           # from gitleaks behind "Binary files ... differ" (security audit of
