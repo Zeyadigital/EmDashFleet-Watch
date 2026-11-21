@@ -117,7 +117,9 @@ attempt() {
   fi
   case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
   stale=0
-  if [ "$code" = "503" ] && [ "$kind" = "healthz" ] && [ "$(head -c 64 "$work/body" 2>/dev/null | tr -d '\r\n')" = "cron_stale" ]; then
+  # The bytes must be exactly cron_stale: no line ending removed, no prefix read
+  # (security audit of 2026-11-21, Watch h18).
+  if [ "$code" = "503" ] && [ "$kind" = "healthz" ] && printf 'cron_stale' | cmp -s - "$work/body"; then
     stale=1
   fi
   if [ "$code" = "000" ]; then echo "$kind attempt $n: no answer"; else echo "$kind attempt $n: HTTP $code"; fi

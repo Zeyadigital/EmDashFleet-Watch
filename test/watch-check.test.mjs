@@ -99,6 +99,16 @@ describe("two failed attempts", () => {
     assert.match(postedText(hook.posts[0]), /^<!channel> A21 /);
   });
 
+  // Only the exact body the dashboard sends is the Cron signal (security audit of 2026-11-21, Watch h18).
+  for (const body of ["cron_\r\nstale", "cron_stale\n", "cron_stale\r\n", "cron_stale and more", "\ncron_stale"]) {
+    test(`a 503 whose body is ${JSON.stringify(body)} twice posts A21, not A20`, async () => {
+      const { target, hook } = await setup([{ status: 503, body }]);
+      const { code } = await runCheck("healthz", testEnv(target, hook));
+      assert.equal(code, 1);
+      assert.match(postedText(hook.posts[0]), /^<!channel> A21 /);
+    });
+  }
+
   test("a 503 cron_stale body on the landing page is A44, not A20", async () => {
     const { target, hook } = await setup([{ status: 503, body: "cron_stale" }]);
     const { code } = await runCheck("landing", testEnv(target, hook, { WATCH_TOKEN: "" }));
