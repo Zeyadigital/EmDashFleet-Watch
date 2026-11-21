@@ -188,6 +188,22 @@ describe("secrets and the public log", () => {
     assert.ok(!script.some((line) => /set -[a-z]*x|xtrace|\becho\b.*\$\{?(token|webhook)\b/.test(line)));
   });
 
+  // A webhook value may hold [ ] { } and commas, which curl would expand into several
+  // requests (security audit of 2026-11-21, Watch h17); every request turns globbing
+  // off, reads no .curlrc and uses no proxy.
+  test("every curl request takes -q, --noproxy '*' and --globoff", () => {
+    const script = readFileSync(CHECK_SCRIPT, "utf8").split("\n").filter((line) => !/^\s*#/.test(line));
+    const common = script.find((line) => /^\s*local common=\(/.test(line)) ?? "";
+    for (const option of ["-q", "--noproxy '*'", "--globoff"]) assert.ok(common.includes(` ${option} `) || common.includes(`(${option} `), `common: ${option}`);
+    const curlLines = script.filter((line) => line.includes("curl "));
+    assert.equal(curlLines.length, 3);
+    for (const line of curlLines) {
+      const options = line.slice(line.indexOf("curl "));
+      if (options.startsWith('curl "${common[@]}"')) continue;
+      for (const option of ["curl -q ", "--noproxy '*'", "--globoff"]) assert.ok(options.includes(option), `${option}: ${line.trim()}`);
+    }
+  });
+
   test("the token reaches the server only as a header", async () => {
     const { target, hook } = await setup([{ status: 200 }]);
     await runCheck("healthz", testEnv(target, hook));
