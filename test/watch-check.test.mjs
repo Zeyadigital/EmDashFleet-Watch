@@ -221,6 +221,9 @@ describe("configuration errors stop the run before any request", () => {
     ["an address with a user name", (env) => ({ ...env, WATCH_URL: env.WATCH_URL.replace("://", "://user:pw@") }), "The address to check holds a user name, a query or a fragment."],
     ["an address with a query", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}?t=1` }), "The address to check holds a user name, a query or a fragment."],
     ["an address with a fragment", (env) => ({ ...env, WATCH_URL: `${env.WATCH_URL}#x` }), "The address to check holds a user name, a query or a fragment."],
+    ["a webhook with braces", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/{a,b}` }), "The alert webhook holds a character that is not allowed."],
+    ["a webhook with brackets", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/[1-3]` }), "The alert webhook holds a character that is not allowed."],
+    ["a webhook with a comma", (env) => ({ ...env, WATCH_WEBHOOK: `${env.WATCH_WEBHOOK}/a,b` }), "The alert webhook holds a character that is not allowed."],
   ];
   for (const [name, change, message] of cases) {
     test(name, async () => {

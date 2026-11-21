@@ -82,6 +82,9 @@ case "$url" in *[@?#]*) fail_config "The address to check holds a user name, a q
 [ -n "$webhook" ] || fail_config "The alert webhook is not set."
 case "$webhook" in "$webhook_prefix"*) ;; *) fail_config "The alert webhook is not a Slack Incoming Webhook address." ;; esac
 case "$webhook" in *[[:space:]\"\\]*) fail_config "The alert webhook holds a character that is not allowed." ;; esac
+# A Slack webhook path holds letters and digits only; curl would expand brackets,
+# braces and commas into several posts (security audit of 2026-11-21, Watch h17).
+case "$webhook" in *[][{},]*) fail_config "The alert webhook holds a character that is not allowed." ;; esac
 case "$environment" in production|staging) ;; *) fail_config "WATCH_ENVIRONMENT is neither production nor staging." ;; esac
 if [ "$kind" = "healthz" ]; then
   [ -n "$token" ] || fail_config "The check-in token is not set."
