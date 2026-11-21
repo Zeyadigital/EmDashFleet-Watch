@@ -96,11 +96,14 @@ stale=0
 # not complete (exit status other than 0: a timeout while the body was still
 # arriving, a closed connection, a body past 1 MiB) is no answer even when
 # curl printed the status line it had received; the token goes only to the
-# healthz check. --globoff keeps brackets in the address literal.
+# healthz check. --globoff keeps brackets in the address literal. Each curl
+# starts with -q, so no .curlrc is read, and takes --noproxy '*', so no proxy
+# variable of the job reroutes the request that carries the token or the
+# webhook address.
 attempt() {
   local n="$1"
   rm -f "$work/body"
-  local common=(--silent --globoff --max-time "$timeout" --max-redirs 0 --max-filesize 1048576 --proto "$proto" --output "$work/body" --write-out '%{http_code}')
+  local common=(-q --noproxy '*' --silent --globoff --max-time "$timeout" --max-redirs 0 --max-filesize 1048576 --proto "$proto" --output "$work/body" --write-out '%{http_code}')
   if [ "$kind" = "healthz" ] && [ -n "$token" ]; then
     code="$(printf 'Authorization: Bearer %s\n' "$token" | curl "${common[@]}" --header @- "$url" 2>/dev/null)" || code=000
   else
@@ -140,7 +143,7 @@ run_url="$(printf '%s' "$run_url" | tr -cd 'A-Za-z0-9:/._-')"
 text="<!channel> $alert ($severity): $signal failed twice, 5 minutes apart ($(describe "$first_code"), then $(describe "$code")). Environment: $environment. Runbook: $runbook. Run: $run_url"
 printf '{"text":"%s"}' "$text" >"$work/payload"
 
-status="$(printf 'url = "%s"\n' "$webhook" | curl --config - --silent --max-time 10 --max-redirs 0 --proto "$proto" --request POST --header 'Content-Type: application/json' --data @"$work/payload" --output /dev/null --write-out '%{http_code}' 2>/dev/null)"
+status="$(printf 'url = "%s"\n' "$webhook" | curl -q --noproxy '*' --globoff --config - --silent --max-time 10 --max-redirs 0 --proto "$proto" --request POST --header 'Content-Type: application/json' --data @"$work/payload" --output /dev/null --write-out '%{http_code}' 2>/dev/null)"
 case "$status" in [0-9][0-9][0-9]) ;; *) status=000 ;; esac
 if [ "$status" = "000" ]; then echo "alert post: no answer"; else echo "alert post: HTTP $status"; fi
 exit 1

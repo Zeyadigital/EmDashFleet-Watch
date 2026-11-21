@@ -1,7 +1,9 @@
 // Tests of scripts/watch-check.sh against a local HTTP server and a stub
 // Incoming Webhook (tracker APC-030, APC-032). Run with `npm test`.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { CHECK_SCRIPT, HOOK_SECRET, TOKEN, postedText, runCheck, startHook, startTarget, testEnv } from "./helpers.mjs";
 
@@ -238,5 +240,24 @@ describe("configuration errors stop the run before any request", () => {
     assert.equal(code, 2);
     assert.match(output, /usage: watch-check\.sh healthz\|landing/);
     assert.equal((await runCheck(null, testEnv(target, hook))).code, 2);
+  });
+});
+
+describe("the job's ambient curl settings", () => {
+  test("a .curlrc and the proxy variables do not reroute the check or the alert post", async () => {
+    const home = mkdtempSync(join(tmpdir(), "watch-home-"));
+    writeFileSync(join(home, ".curlrc"), 'proxy = "http://127.0.0.1:9"\n');
+    try {
+      const { target, hook } = await setup([{ status: 500 }, { status: 500 }]);
+      const proxy = "http://127.0.0.1:9";
+      const env = testEnv(target, hook, { HOME: home, ALL_PROXY: proxy, all_proxy: proxy, HTTP_PROXY: proxy, http_proxy: proxy });
+      const { code } = await runCheck("healthz", env);
+      assert.equal(code, 1);
+      assert.equal(target.requests.length, 2);
+      assert.equal(target.requests[0].authorization, `Bearer ${TOKEN}`);
+      assert.equal(hook.posts.length, 1);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
