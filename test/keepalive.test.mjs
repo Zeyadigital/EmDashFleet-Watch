@@ -168,4 +168,13 @@ describe("keepalive.sh", () => {
     assert.match(script, /^remote="https:\/\/github\.com\/Zeyadigital\/EmDashFleet-Watch\.git"$/m);
     assert.doesNotMatch(script.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"), /--force|push -f|\+HEAD|--no-verify/);
   });
+
+  test("the commit never uses a guessed identity, on any host", () => {
+    // The behavioural test above detects a regression only where git can guess
+    // (a hostname with a dot, as macOS .local); an undotted CI host refuses
+    // either way, so the option itself is pinned (security audit of 2026-11-21, Watch v06).
+    const script = readFileSync(SCRIPT, "utf8");
+    const commits = script.split("\n").filter((line) => /^\s*git .* commit /.test(line));
+    assert.deepEqual(commits.map((line) => /^git -C "\$repo" -c user\.useConfigOnly=true commit /.test(line)), [true]);
+  });
 });
