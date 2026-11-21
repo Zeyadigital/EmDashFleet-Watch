@@ -110,10 +110,31 @@ for (const [file, want] of Object.entries(WORKFLOWS)) {
       assert.equal(text.match(/^  [a-z-]+:$/gm).filter((key) => key !== "  schedule:").length, 1);
       const minutes = Number(/timeout-minutes: (\d+)/.exec(text)?.[1]);
       assert.ok(minutes >= 12 && minutes <= 30, `timeout-minutes is ${minutes}`);
+      // The worst case of one step is 10 s for the first request, 300 s of waiting, 10 s for the
+      // second request and 10 s for the alert post: 330 s. Two steps and a 120 s margin for the
+      // checkout and the start of the job must fit (security audit of 2026-11-21, Watch S4).
+      assert.ok(minutes * 60 >= 2 * 330 + 120, `timeout-minutes ${minutes} leaves less than 120 s beyond two worst-case steps`);
       assert.match(text, /^ {4}runs-on: ubuntu-latest$/m);
       // The checkout holds the scripts folder only (security audit of 2026-11-21).
       assert.match(text, /^ {10}sparse-checkout: scripts$/m);
       assert.doesNotMatch(text, /continue-on-error/);
+    });
+
+    // The one place a curl variable, a PATH entry or a different shell could reach both steps
+    // without any step changing is a workflow-level or job-level env:, a defaults: block or a
+    // shell: key, so none exists; each step's own env: is the only one (security audit of
+    // 2026-11-21, Watch S4).
+    test("has no workflow-level or job-level env:, no defaults: and no shell:", () => {
+      const text = code(file);
+      assert.doesNotMatch(text, /^env:/m, "a workflow-level env:");
+      assert.doesNotMatch(text, /^ {4}env:/m, "a job-level env:");
+      assert.doesNotMatch(text, /^defaults:/m, "a workflow-level defaults:");
+      assert.doesNotMatch(text, /^ {4}defaults:/m, "a job-level defaults:");
+      assert.doesNotMatch(text, /^\s*(?:- )?shell:/m, "a shell: key");
+      assert.doesNotMatch(text, /\$GITHUB_(?:ENV|PATH)\b/, "a write to GITHUB_ENV or GITHUB_PATH");
+      const envs = text.match(/^\s*env:/gm) ?? [];
+      assert.equal(envs.length, 2, "one step env: for each of the two steps");
+      for (const step of steps(file)) if (step.name !== null) assert.match(step.text, /^ {8}env:$/m, step.name);
     });
 
     test("has the two separate steps, healthz first, the landing page after a failed one", () => {
